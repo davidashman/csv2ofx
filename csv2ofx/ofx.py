@@ -46,8 +46,9 @@ class OFX(Content):
         """
         # TODO: Add timezone info  # pylint: disable=fixme
         super().__init__(mapping, **kwargs)
-        self.resp_type = "INTRATRNRS" if self.split_account else "STMTTRNRS"
         self.def_type = kwargs.get("def_type")
+        self.credit_line = self.def_type == "CREDITLINE"
+        self.resp_type = "INTRATRNRS" if self.split_account else "CCSTMTTRNRS" if self.credit_line else "STMTTRNRS"
         self.prev_group = None
         self.first_trxn = None
         self.last_trxn = None
@@ -106,10 +107,10 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
         )
 
         content = ""
-        if self.ms_money:
+        if self.ms_money or self.quicken:
             content += "OFXHEADER:100\n"
         content += "DATA:OFXSGML\n"
-        if self.ms_money:
+        if self.ms_money or self.quicken:
             content += "VERSION:102\n"
             content += "SECURITY:NONE\n"
             content += "ENCODING:USASCII\n"
@@ -123,22 +124,28 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
         content += "\t<SIGNONMSGSRSV1>\n"
         content += "\t\t<SONRS>\n"
         content += "\t\t\t<STATUS>\n"
-        content += "\t\t\t\t<CODE>0</CODE>\n"
-        content += "\t\t\t\t<SEVERITY>INFO</SEVERITY>\n"
+        content += "\t\t\t\t<CODE>0\n"
+        content += "\t\t\t\t<SEVERITY>INFO\n"
         content += "\t\t\t</STATUS>\n"
-        content += f"\t\t\t<DTSERVER>{time_stamp}</DTSERVER>\n"
-        content += "\t\t\t<LANGUAGE>{language}</LANGUAGE>\n".format(**kwargs)
+        content += f"\t\t\t<DTSERVER>{time_stamp}\n"
+        content += "\t\t\t<LANGUAGE>{language}\n".format(**kwargs)
+        content += "\t\t\t<FI>\n"
+        content += "\t\t\t\t<FID>{bank_id}\n".format(**kwargs)
+        content += "\t\t\t</FI>\n"
         content += "\t\t</SONRS>\n"
         content += "\t</SIGNONMSGSRSV1>\n"
-        content += "\t<BANKMSGSRSV1>\n"
+        if self.credit_line:
+            content += "\t<CREDITCARDMSGSRSV1>\n"
+        else:
+            content += "\t<BANKMSGSRSV1>\n"
         content += f"\t\t<{self.resp_type}>\n"
         if self.ms_money:
-            content += "\t\t\t<TRNUID>1</TRNUID>\n"
+            content += "\t\t\t<TRNUID>1\n"
         else:
-            content += "\t\t\t<TRNUID></TRNUID>\n"
+            content += "\t\t\t<TRNUID>0\n"
         content += "\t\t\t<STATUS>\n"
-        content += "\t\t\t\t<CODE>0</CODE>\n"
-        content += "\t\t\t\t<SEVERITY>INFO</SEVERITY>\n"
+        content += "\t\t\t\t<CODE>0\n"
+        content += "\t\t\t\t<SEVERITY>INFO\n"
         content += "\t\t\t</STATUS>\n"
         yield content
 
@@ -256,16 +263,24 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
                 "end_date": self.end.strftime("%Y%m%d"),
             })
 
-        content = "\t\t\t<STMTRS>\n"
-        content += "\t\t\t\t<CURDEF>{currency}</CURDEF>\n".format(**kwargs)
-        content += "\t\t\t\t<BANKACCTFROM>\n"
-        content += "\t\t\t\t\t<BANKID>{bank_id}</BANKID>\n".format(**kwargs)
-        content += "\t\t\t\t\t<ACCTID>{account_id}</ACCTID>\n".format(**kwargs)
-        content += "\t\t\t\t\t<ACCTTYPE>{account_type}</ACCTTYPE>\n".format(**kwargs)
-        content += "\t\t\t\t</BANKACCTFROM>\n"
+        if self.credit_line:
+            content = "\t\t\t<CCSTMTRS>\n"
+        else:
+            content = "\t\t\t<STMTRS>\n"
+        content += "\t\t\t\t<CURDEF>{currency}\n".format(**kwargs)
+        if self.credit_line:
+            content += "\t\t\t\t<CCACCTFROM>\n"
+            content += "\t\t\t\t\t<ACCTID>{account_id}\n".format(**kwargs)
+            content += "\t\t\t\t</CCACCTFROM>\n"
+        else:
+            content += "\t\t\t\t<BANKACCTFROM>\n"
+            content += "\t\t\t\t\t<BANKID>{bank_id}\n".format(**kwargs)
+            content += "\t\t\t\t\t<ACCTID>{account_id}\n".format(**kwargs)
+            content += "\t\t\t\t\t<ACCTTYPE>{account_type}\n".format(**kwargs)
+            content += "\t\t\t\t</BANKACCTFROM>\n"
         content += "\t\t\t\t<BANKTRANLIST>\n"
-        content += "\t\t\t\t\t<DTSTART>{start_date}</DTSTART>\n".format(**kwargs)
-        content += "\t\t\t\t\t<DTEND>{end_date}</DTEND>\n".format(**kwargs)
+        content += "\t\t\t\t\t<DTSTART>{start_date}\n".format(**kwargs)
+        content += "\t\t\t\t\t<DTEND>{end_date}\n".format(**kwargs)
         return content
 
     def transaction(self, **kwargs):
@@ -299,22 +314,22 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
         time_stamp = kwargs["date"].strftime("%Y%m%d%H%M%S")  # yyyymmddhhmmss
 
         content = "\t\t\t\t\t<STMTTRN>\n"
-        content += "\t\t\t\t\t\t<TRNTYPE>{type}</TRNTYPE>\n".format(**kwargs)
-        content += f"\t\t\t\t\t\t<DTPOSTED>{time_stamp}</DTPOSTED>\n"
-        content += "\t\t\t\t\t\t<TRNAMT>{amount:0.2f}</TRNAMT>\n".format(**kwargs)
-        content += "\t\t\t\t\t\t<FITID>{id}</FITID>\n".format(**kwargs)
+        content += "\t\t\t\t\t\t<TRNTYPE>{type}\n".format(**kwargs)
+        content += f"\t\t\t\t\t\t<DTPOSTED>{time_stamp}\n"
+        content += "\t\t\t\t\t\t<TRNAMT>{amount:0.2f}\n".format(**kwargs)
+        content += "\t\t\t\t\t\t<FITID>{id}\n".format(**kwargs)
 
         if (self.ms_money and kwargs.get("check_num")) or (
             not self.ms_money and kwargs.get("check_num") is not None
         ):
-            extra = "\t\t\t\t\t\t<CHECKNUM>%(check_num)s</CHECKNUM>\n"
+            extra = "\t\t\t\t\t\t<CHECKNUM>%(check_num)s\n"
             content += extra % kwargs
 
         if kwargs.get("payee") is not None:
-            content += "\t\t\t\t\t\t<NAME>{payee}</NAME>\n".format(**kwargs)
+            content += "\t\t\t\t\t\t<NAME>{payee}\n".format(**kwargs)
 
         if kwargs.get("memo"):
-            content += "\t\t\t\t\t\t<MEMO>{memo}</MEMO>\n".format(**kwargs)
+            content += "\t\t\t\t\t\t<MEMO>{memo}\n".format(**kwargs)
 
         content += "\t\t\t\t\t</STMTTRN>\n"
         return content
@@ -378,14 +393,17 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
 
         if balamt is not None:
             content += "\t\t\t\t<LEDGERBAL>\n"
-            content += f"\t\t\t\t\t<BALAMT>{balamt:0.2f}</BALAMT>\n"
-            content += f"\t\t\t\t\t<DTASOF>{time_stamp}</DTASOF>\n"
+            content += f"\t\t\t\t\t<BALAMT>{balamt:0.2f}\n"
+            content += f"\t\t\t\t\t<DTASOF>{time_stamp}\n"
             content += "\t\t\t\t</LEDGERBAL>\n"
         elif self.ms_money:
             # MS Money import fails if <LEDGERBAL> is missing
             raise BalanceError(f"Ending balance not specified and {reason}")
 
-        content += "\t\t\t</STMTRS>\n"
+        if self.credit_line:
+            content += "\t\t\t</CCSTMTRS>\n"
+        else:
+            content += "\t\t\t</STMTRS>\n"
         return content
 
     def transfer(self, **kwargs):
@@ -544,7 +562,12 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
         else:
             content = ""
 
-        content += f"\t\t</{self.resp_type}>\n\t</BANKMSGSRSV1>\n</OFX>\n"
+        content += f"\t\t</{self.resp_type}>\n"
+        if self.credit_line:
+            content += f"\t</CREDITCARDMSGSRSV1>\n"
+        else:
+            content += f"\t</BANKMSGSRSV1>\n"
+        content += "</OFX>\n"
         yield content
 
     def gen_body(self, data):  # noqa: C901

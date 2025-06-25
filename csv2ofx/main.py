@@ -86,6 +86,13 @@ parser.add_argument(
     help="default account type 'CHECKING' for OFX and 'Bank' for QIF.",
 )
 parser.add_argument(
+    "-b",
+    "--bank-id",
+    metavar="BANK_ID",
+    help="the bank ID to include in the OFX header",
+    default="000000",
+)
+parser.add_argument(
     "-e",
     "--end",
     metavar="DATE",
@@ -190,6 +197,13 @@ parser.add_argument(
     default=False,
 )
 parser.add_argument(
+    "-Q",
+    "--quicken",
+    help="enables Quicken compatible 'OFX' output",
+    action="store_true",
+    default=False,
+)
+parser.add_argument(
     "-o",
     "--overwrite",
     action="store_true",
@@ -241,10 +255,12 @@ def run(args=None):  # noqa: C901
     mapping = (args.custom or load_package_module(args.mapping)).mapping
 
     okwargs = {
-        "def_type": args.account_type or "Bank" if args.qif else "CHECKING",
+        "def_type": args.account_type or ("Bank" if args.qif else "CHECKING"),
         "start": parse(args.start, dayfirst=args.dayfirst) if args.start else None,
         "end": parse(args.end, dayfirst=args.dayfirst) if args.end else None,
         "ms_money": args.ms_money,
+        "quicken": args.quicken,
+        "bank_id": args.bank_id,
     }
 
     cont = QIF(mapping, **okwargs) if args.qif else OFX(mapping, **okwargs)
@@ -279,7 +295,7 @@ def run(args=None):  # noqa: C901
 
             server_date = dt.fromtimestamp(mtime)
 
-        header = cont.header(date=server_date, language=args.language)
+        header = cont.header(date=server_date, language=args.language, bank_id=args.bank_id)
         footer = cont.footer(date=server_date, balance=args.ending_balance)
         filtered = filter(None, [header, body, footer])
         content = it.chain.from_iterable(filtered)
@@ -301,6 +317,7 @@ def run(args=None):  # noqa: C901
     try:
         res = write(dest, IterStringIO(content), **kwargs)
     except KeyError as err:
+        traceback.print_exc()
         msg = f"Field {err} is missing from file. Check `mapping` option."
     except TypeError as err:
         msg = f"No data to write. {str(err)}. "
