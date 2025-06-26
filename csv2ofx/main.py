@@ -86,11 +86,10 @@ parser.add_argument(
     help="default account type 'CHECKING' for OFX and 'Bank' for QIF.",
 )
 parser.add_argument(
-    "-b",
-    "--bank-id",
-    metavar="BANK_ID",
-    help="the bank ID to include in the OFX header",
-    default="000000",
+    "-i",
+    "--institution",
+    metavar="INSTITUTION",
+    help="financial institution name or ID"
 )
 parser.add_argument(
     "-e",
@@ -190,16 +189,9 @@ parser.add_argument(
     default=False,
 )
 parser.add_argument(
-    "-M",
-    "--ms-money",
-    help="enables MS Money compatible 'OFX' output",
-    action="store_true",
-    default=False,
-)
-parser.add_argument(
-    "-Q",
-    "--quicken",
-    help="enables Quicken compatible 'OFX' output",
+    "-S",
+    "--strict",
+    help="enables strict mode requiring extended headers, back ID and balance",
     action="store_true",
     default=False,
 )
@@ -258,9 +250,8 @@ def run(args=None):  # noqa: C901
         "def_type": args.account_type or ("Bank" if args.qif else "CHECKING"),
         "start": parse(args.start, dayfirst=args.dayfirst) if args.start else None,
         "end": parse(args.end, dayfirst=args.dayfirst) if args.end else None,
-        "ms_money": args.ms_money,
-        "quicken": args.quicken,
-        "bank_id": args.bank_id,
+        "strict": args.strict,
+        "institution": args.institution,
     }
 
     cont = QIF(mapping, **okwargs) if args.qif else OFX(mapping, **okwargs)
@@ -295,7 +286,7 @@ def run(args=None):  # noqa: C901
 
             server_date = dt.fromtimestamp(mtime)
 
-        header = cont.header(date=server_date, language=args.language, bank_id=args.bank_id)
+        header = cont.header(date=server_date, language=args.language)
         footer = cont.footer(date=server_date, balance=args.ending_balance)
         filtered = filter(None, [header, body, footer])
         content = it.chain.from_iterable(filtered)
