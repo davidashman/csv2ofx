@@ -89,7 +89,7 @@ parser.add_argument(
     "-i",
     "--institution",
     metavar="INSTITUTION",
-    help="financial institution name or ID"
+    help="financial institution ID to include in the header (default: None)",
 )
 parser.add_argument(
     "-e",
