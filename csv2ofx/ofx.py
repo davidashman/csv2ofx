@@ -47,8 +47,6 @@ class OFX(Content):
         # TODO: Add timezone info  # pylint: disable=fixme
         super().__init__(mapping, **kwargs)
         self.def_type = kwargs.get("def_type")
-        self.credit_line = self.def_type == "CREDITLINE"
-        self.resp_type = "INTRATRNRS" if self.split_account else "CCSTMTTRNRS" if self.credit_line else "STMTTRNRS"
         self.prev_group = None
         self.first_trxn = None
         self.last_trxn = None
@@ -62,8 +60,9 @@ class OFX(Content):
             "CHECKING": ("checking", "income", "receivable", "payable"),
             "SAVINGS": ("savings",),
             "MONEYMRKT": ("market", "cash", "expenses"),
-            "CREDITLINE": ("visa", "master", "express", "discover"),
+            "CREDITLINE": ("visa", "master", "express", "discover", "card"),
         }
+        self.current_account_type = None
 
     def header(self, **kwargs):
         """ Gets OFX format transaction content
@@ -137,19 +136,6 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
 
         content += "\t\t</SONRS>\n"
         content += "\t</SIGNONMSGSRSV1>\n"
-        if self.credit_line:
-            content += "\t<CREDITCARDMSGSRSV1>\n"
-        else:
-            content += "\t<BANKMSGSRSV1>\n"
-        content += f"\t\t<{self.resp_type}>\n"
-        if self.strict:
-            content += "\t\t\t<TRNUID>1</TRNUID>\n"
-        else:
-            content += "\t\t\t<TRNUID></TRNUID>\n"
-        content += "\t\t\t<STATUS>\n"
-        content += "\t\t\t\t<CODE>0</CODE>\n"
-        content += "\t\t\t\t<SEVERITY>INFO</SEVERITY>\n"
-        content += "\t\t\t</STATUS>\n"
         yield content
 
     def transaction_data(self, trxn):
@@ -220,6 +206,35 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
         data.update(new_data)
         return data
 
+    def account_type_start(self, **kwargs):
+        if self.current_account_type == None:
+            content = ""
+        else:
+            content = self.account_type_end(**kwargs)
+
+        self.current_account_type = kwargs.get("account_type")
+        match self.current_account_type:
+            case "CREDITLINE":
+                content += "\t<CREDITCARDMSGSRSV1>\n"
+                content += "\t\t<CCSTMTTRNRS>\n"
+            case _:
+                content += "\t<BANKMSGSRSV1>\n"
+                if self.split_account:
+                    content += "\t\t<INTRATRNRS>\n"
+                else:
+                    content += "\t\t<STMTTRNRS>\n"
+
+        if self.strict:
+            content += "\t\t\t<TRNUID>1</TRNUID>\n"
+        else:
+            content += "\t\t\t<TRNUID></TRNUID>\n"
+
+        content += "\t\t\t<STATUS>\n"
+        content += "\t\t\t\t<CODE>0</CODE>\n"
+        content += "\t\t\t\t<SEVERITY>INFO</SEVERITY>\n"
+        content += "\t\t\t</STATUS>\n"
+        return content
+
     def account_start(self, **kwargs):
         """ Gets OFX format transaction account start content
 
@@ -266,21 +281,27 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
                 "end_date": self.end.strftime("%Y%m%d"),
             })
 
-        if self.credit_line:
-            content = "\t\t\t<CCSTMTRS>\n"
+        if self.current_account_type != kwargs.get("account_type"):
+            content = self.account_type_start(**kwargs)
         else:
-            content = "\t\t\t<STMTRS>\n"
-        content += "\t\t\t\t<CURDEF>{currency}\n".format(**kwargs)
-        if self.credit_line:
-            content += "\t\t\t\t<CCACCTFROM>\n"
-            content += "\t\t\t\t\t<ACCTID>{account_id}</ACCTID>\n".format(**kwargs)
-            content += "\t\t\t\t</CCACCTFROM>\n"
-        else:
-            content += "\t\t\t\t<BANKACCTFROM>\n"
-            content += "\t\t\t\t\t<BANKID>{bank_id}</BANKID>\n".format(**kwargs)
-            content += "\t\t\t\t\t<ACCTID>{account_id}</ACCTID>\n".format(**kwargs)
-            content += "\t\t\t\t\t<ACCTTYPE>{account_type}</ACCTTYPE>\n".format(**kwargs)
-            content += "\t\t\t\t</BANKACCTFROM>\n"
+            content = ""
+
+        match self.current_account_type:
+            case "CREDITLINE":
+                content += "\t\t\t<CCSTMTRS>\n"
+                content += "\t\t\t\t<CURDEF>{currency}</CURDEF>\n".format(**kwargs)
+                content += "\t\t\t\t<CCACCTFROM>\n"
+                content += "\t\t\t\t\t<ACCTID>{account_id}</ACCTID>\n".format(**kwargs)
+                content += "\t\t\t\t</CCACCTFROM>\n"
+            case _:
+                content += "\t\t\t<STMTRS>\n"
+                content += "\t\t\t\t<CURDEF>{currency}</CURDEF>\n".format(**kwargs)
+                content += "\t\t\t\t<BANKACCTFROM>\n"
+                content += "\t\t\t\t\t<BANKID>{bank_id}</BANKID>\n".format(**kwargs)
+                content += "\t\t\t\t\t<ACCTID>{account_id}</ACCTID>\n".format(**kwargs)
+                content += "\t\t\t\t\t<ACCTTYPE>{account_type}</ACCTTYPE>\n".format(**kwargs)
+                content += "\t\t\t\t</BANKACCTFROM>\n"
+
         content += "\t\t\t\t<BANKTRANLIST>\n"
         content += "\t\t\t\t\t<DTSTART>{start_date}</DTSTART>\n".format(**kwargs)
         content += "\t\t\t\t\t<DTEND>{end_date}</DTEND>\n".format(**kwargs)
@@ -335,6 +356,19 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
             content += "\t\t\t\t\t\t<MEMO>{memo}</MEMO>\n".format(**kwargs)
 
         content += "\t\t\t\t\t</STMTTRN>\n"
+        return content
+
+    def account_type_end(self, **kwargs):
+        match self.current_account_type:
+            case "CREDITLINE":
+                content = "\t\t<CCSTMTTRNRS>\n"
+                content += "\t</CREDITCARDMSGSRSV1>\n"
+            case _:
+                if self.split_account:
+                    content = "\t\t<INTRATRNRS>\n"
+                else:
+                    content = "\t\t<STMTTRNRS>\n"
+                content += "\t</BANKMSGSRSV1>\n"
         return content
 
     def account_end(self, **kwargs):
@@ -396,17 +430,19 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
 
         if balamt is not None:
             content += "\t\t\t\t<LEDGERBAL>\n"
-            content += f"\t\t\t\t\t<BALAMT>{balamt:0.2f}\n"
-            content += f"\t\t\t\t\t<DTASOF>{time_stamp}\n"
+            content += f"\t\t\t\t\t<BALAMT>{balamt:0.2f}</BALAMT>\n"
+            content += f"\t\t\t\t\t<DTASOF>{time_stamp}</DTASOF>\n"
             content += "\t\t\t\t</LEDGERBAL>\n"
         elif self.strict:
             # MS Money import fails if <LEDGERBAL> is missing
             raise BalanceError(f"Ending balance not specified and {reason}")
 
-        if self.credit_line:
-            content += "\t\t\t</CCSTMTRS>\n"
-        else:
-            content += "\t\t\t</STMTRS>\n"
+        match self.current_account_type:
+            case "CREDITLINE":
+                content += "\t\t\t</CCSTMTRS>\n"
+            case _:
+                content += "\t\t\t</STMTRS>\n"
+
         return content
 
     def transfer(self, **kwargs):
@@ -560,16 +596,11 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
 
         if self.is_split:
             content = self.transfer_end(**kwargs)
-        elif not self.split_account:
-            content = self.account_end(**kwargs)
         else:
             content = ""
 
-        content += f"\t\t</{self.resp_type}>\n"
-        if self.credit_line:
-            content += f"\t</CREDITCARDMSGSRSV1>\n"
-        else:
-            content += f"\t</BANKMSGSRSV1>\n"
+        content += self.account_end(**kwargs)
+        content += self.account_type_end(**kwargs)
         content += "</OFX>\n"
         yield content
 
