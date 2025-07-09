@@ -361,13 +361,13 @@ ENCODING:USASCIICHARSET:1252COMPRESSION:NONEOLDFILEUID:NONENEWFILEUID:NONE\
     def account_type_end(self, **kwargs):
         match self.current_account_type:
             case "CREDITLINE":
-                content = "\t\t<CCSTMTTRNRS>\n"
+                content = "\t\t</CCSTMTTRNRS>\n"
                 content += "\t</CREDITCARDMSGSRSV1>\n"
             case _:
                 if self.split_account:
-                    content = "\t\t<INTRATRNRS>\n"
+                    content = "\t\t<I/NTRATRNRS>\n"
                 else:
-                    content = "\t\t<STMTTRNRS>\n"
+                    content = "\t\t</STMTTRNRS>\n"
                 content += "\t</BANKMSGSRSV1>\n"
         return content
 
